@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Range Weather Control</title>
+    <link rel="stylesheet" href="range-weather-control.css" />
+  </head>
+  <body>
+    <main class="app">
+            <section class="left-panel">
+        <button id="settingsBtn" class="settings-trigger">Open Settings</button>
+        <div class="panel">
+          <h2>Mode &amp; Serial</h2>
+          <div class="control-grid">
+            <label for="modeSelect">App mode</label>
+            <select id="modeSelect">
+              <option value="mock" selected>Mock mode</option>
+              <option value="live">Live serial</option>
+            </select>
+            <label for="baudInput">Baud rate</label>
+            <input type="number" id="baudInput" value="115200" min="1200" step="100" />
+          </div>
+          <div class="inline-row" style="margin-top: 0.5rem">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+          </div>
+          <div class="subtext" id="serialStatus">Web Serial idle</div>
+          <div class="subtext" id="portInfo"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Downlink Control</h2>
+          <div class="control-grid">
+            <label for="netIdInput">Network ID</label>
+            <input id="netIdInput" value="0x42" />
+            <label for="targetNodeInput">Target node (optional)</label>
+            <input id="targetNodeInput" placeholder="ALL" />
+            <label for="rateInput">Sample rate (Hz)</label>
+            <input type="number" id="rateInput" value="2" min="1" step="1" />
+            <label for="burstInput">Burst count</label>
+            <input type="number" id="burstInput" value="5" min="1" step="1" />
+            <label for="durationInput">Duration (s)</label>
+            <input type="number" id="durationInput" value="15" min="1" step="1" />
+          </div>
+          <div class="inline-row" style="margin-top: 0.5rem">
+            <button id="startBtn">Start streaming</button>
+            <button id="stopBtn">Stop streaming</button>
+          </div>
+          <button id="gustBtn" style="margin-top: 0.5rem; width: 100%">
+            Gust check (5 Hz burst)
+          </button>
+          <div class="progress">
+            <span id="commandProgressFill"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="right-panel">
+        <div class="panel gauge-panel">
+          <h2>Fusion Output</h2>
+          <div class="gauge">
+            <div>
+              <div class="subtext">Combined crosswind</div>
+              <div id="crosswindValue" class="mono large">0.00 m/s (0.00 mph)</div>
+              <div id="crosswindDirection" class="subtext">Waiting for samples</div>
+            </div>
+            <div>
+              <div class="subtext">Hold</div>
+              <div id="holdReadout" class="hold">0.00 MIL</div>
+              <div id="holdSubtext" class="subtext">Steady average pending</div>
+              <div id="gustInfo" class="subtext"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Range schematic</h2>
+          <div class="schematic-wrapper">
+            <canvas id="schematicCanvas" width="700" height="260"></canvas>
+          </div>
+          <p class="range-note">
+            Shooter and target rotate with the shooting azimuth so you can visualize heading changes. Wind arrows extend away from each station and grow with speed.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h2>Station cards</h2>
+          <div id="stationsContainer" class="stations-grid">
+            <p class="subtext">Awaiting station samples...</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Live trend (60 s)</h2>
+          <canvas id="trendCanvas" width="700" height="220"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <div class="settings-overlay hidden" id="settingsOverlay">
+      <div class="settings-panel">
+        <div class="settings-header">
+          <div>
+            <h2>Settings</h2>
+            <p class="range-note">
+              Configure range geometry, mock generator, ballistics, and logging here. These rarely change mid-session, so they live in this drawer.
+            </p>
+          </div>
+          <button id="closeSettingsBtn">Close</button>
+        </div>
+        <div class="settings-grid">
+          <div class="panel">
+            <h2>Range &amp; Stations</h2>
+            <div class="control-grid">
+              <label for="rangeMetersInput">Range (m)</label>
+              <input type="number" id="rangeMetersInput" min="1" max="1609" value="800" />
+              <label for="rangeYardsInput">Range (yd)</label>
+              <input type="number" id="rangeYardsInput" min="1" max="1760" value="875" />
+              <label>Display units</label>
+              <div class="inline-row unit-toggle">
+                <label><input type="radio" name="unitSystemToggle" id="unitMetric" value="metric" checked /> Metric</label>
+                <label><input type="radio" name="unitSystemToggle" id="unitImperial" value="imperial" /> Imperial</label>
+              </div>
+              <label>Hold unit</label>
+              <div class="inline-row unit-toggle">
+                <label><input type="radio" name="unitToggle" id="unitMil" value="MIL" checked /> MIL</label>
+                <label><input type="radio" name="unitToggle" id="unitMoa" value="MOA" /> MOA</label>
+              </div>
+              <label for="shootAzInput">Shooting azimuth (deg)</label>
+              <input type="number" id="shootAzInput" min="0" max="359" value="0" />
+            </div>
+            <p class="range-note">
+              Up to 1 mile (1609 m / 1760 yd). Station path fractions map the shooter at 0.0 and the target at 1.0.
+            </p>
+            <table class="station-table">
+              <thead>
+                <tr>
+                  <th>Slot</th>
+                  <th>Node ID</th>
+                  <th>Path fraction s</th>
+                  <th>Distance m</th>
+                </tr>
+              </thead>
+              <tbody id="stationConfigBody"></tbody>
+            </table>
+          </div>
+
+          <div class="panel" id="mockPanel">
+            <h2>Mock Wind Generator</h2>
+            <div class="control-grid">
+              <label for="baseSpeedInput">Base speed (m/s)</label>
+              <input type="number" id="baseSpeedInput" value="6" min="0" max="40" step="0.5" />
+              <label for="baseDirInput">Base direction (deg)</label>
+              <input type="number" id="baseDirInput" value="270" min="0" max="359" />
+              <label for="speedNoiseInput">Speed jitter ±</label>
+              <input type="number" id="speedNoiseInput" value="1.2" min="0" max="10" step="0.1" />
+              <label for="dirNoiseInput">Direction jitter ±</label>
+              <input type="number" id="dirNoiseInput" value="15" min="0" max="90" step="1" />
+              <label for="packetLossInput">Packet loss</label>
+              <input type="range" id="packetLossInput" min="0" max="0.5" step="0.01" value="0.05" />
+              <label id="packetLossLabel">5% simulated loss</label>
+            </div>
+            <div class="inline-row" style="margin-top: 0.5rem">
+              <button id="injectGustBtn">Inject gust</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Ballistics</h2>
+            <div class="control-grid">
+              <label for="ballisticSelect">Cartridge</label>
+              <select id="ballisticSelect"></select>
+              <label for="manualTofInput">Manual TOF (s)</label>
+              <input type="number" id="manualTofInput" min="0" step="0.01" placeholder="optional" />
+            </div>
+            <p class="subtext" id="ballisticSummary"></p>
+            <p class="range-note">
+              Upload CSV with <code>range_m,tof_s</code> or <code>range_m,drop_m</code>. TOF rows drive the interpolation. Drop rows are stored for future CAD wake work.
+            </p>
+            <input type="file" id="uploadCsvInput" accept=".csv" />
+            <h3>Add cartridge</h3>
+            <div class="control-grid">
+              <label for="cartNameInput">Name</label>
+              <input id="cartNameInput" placeholder=".300 Norma" />
+              <label for="cartMvInput">Muzzle velocity (ft/s)</label>
+              <input type="number" id="cartMvInput" min="100" max="1500" step="1" />
+              <label for="cartBcInput">BC (G1)</label>
+              <input type="number" id="cartBcInput" min="0.1" max="1" step="0.001" />
+            </div>
+            <button id="addCartBtn" style="margin-top: 0.5rem">Save cartridge</button>
+          </div>
+
+          <div class="panel">
+            <h2>Logging &amp; Console</h2>
+            <div class="inline-row">
+              <button id="downloadCsvBtn">Download last 10 min CSV</button>
+              <span id="logSummary" class="subtext">No samples yet</span>
+            </div>
+            <div class="console" id="console"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="range-weather-control.js"></script>
+
+  </body>
+</html>
+
