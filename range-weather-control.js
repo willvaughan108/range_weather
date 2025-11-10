@@ -615,12 +615,8 @@
       ctx.fillText(rangePair, px + 18, py - 2);
 
       const sample = station.lastSample;
-      if (sample && typeof sample.spd === "number") {
-        const crosswind =
-          typeof station.crosswind === "number"
-            ? station.crosswind
-            : computeCrosswindForSample(sample);
-        drawCrosswindArrow(ctx, px, py - 26, crosswind);
+      if (sample && typeof sample.spd === "number" && typeof sample.dir === "number") {
+        drawWindVectorArrow(ctx, px, py - 26, sample.dir, sample.spd);
       }
     });
   }
@@ -639,36 +635,48 @@
     ctx.fillText(label, x + side * 40, y + 4);
   }
 
-  function drawCrosswindArrow(ctx, x, y, crosswind) {
-    if (!Number.isFinite(crosswind)) {
+  function drawWindVectorArrow(ctx, x, y, dirDegComingFrom, speed) {
+    if (!Number.isFinite(speed) || !Number.isFinite(dirDegComingFrom)) {
       return;
     }
-    const direction = crosswind >= 0 ? 1 : -1;
-    const magnitude = Math.min(140, Math.abs(crosswind) * 25);
-    const startX = x;
-    const endX = x + direction * magnitude;
-    const baseY = y;
+    const relative = normalizeDeg(dirDegComingFrom - state.shootingAzimuth);
+    const relRad = relative * DEG2RAD;
+    // Arrow points toward the station from the incoming direction.
+    const axisX = -Math.sin(relRad);
+    const axisY = Math.cos(relRad);
+    const clampedSpeed = Math.max(0, speed);
+    const arrowLength = 18 + Math.min(120, clampedSpeed * 8);
+    const endX = x + axisX * arrowLength;
+    const endY = y + axisY * arrowLength;
 
     ctx.strokeStyle = "rgba(79, 176, 255, 0.9)";
     ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.moveTo(startX, baseY);
-    ctx.lineTo(endX, baseY);
+    ctx.moveTo(x, y);
+    ctx.lineTo(endX, endY);
     ctx.stroke();
 
+    const angle = Math.atan2(endY - y, endX - x);
+    const headSize = 6 + Math.min(10, clampedSpeed * 0.6);
     ctx.beginPath();
-    ctx.moveTo(endX, baseY);
-    ctx.lineTo(endX - direction * 8, baseY - 5);
-    ctx.lineTo(endX - direction * 8, baseY + 5);
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(
+      endX - Math.cos(angle - Math.PI / 6) * headSize,
+      endY - Math.sin(angle - Math.PI / 6) * headSize
+    );
+    ctx.lineTo(
+      endX - Math.cos(angle + Math.PI / 6) * headSize,
+      endY - Math.sin(angle + Math.PI / 6) * headSize
+    );
     ctx.closePath();
     ctx.fillStyle = "rgba(79, 176, 255, 0.85)";
     ctx.fill();
 
     ctx.fillStyle = "#f0f4f8";
     ctx.font = "11px 'Segoe UI', sans-serif";
-    ctx.textAlign = direction > 0 ? "left" : "right";
-    const speedLabel = getSpeedDisplay(crosswind).primary;
-    ctx.fillText(speedLabel, endX + direction * 6, baseY - 6);
+    ctx.textAlign = axisX >= 0 ? "left" : "right";
+    const speedLabel = getSpeedDisplay(clampedSpeed).primary;
+    ctx.fillText(speedLabel, endX + Math.sign(axisX || 1) * 6, endY - 6);
   }
 
   function renderStationCards() {
@@ -689,7 +697,10 @@
         const lossPct = packetTotal > 0 ? ((station.lostPackets / packetTotal) * 100).toFixed(1) : "0.0";
         const crosswindText =
           typeof station.crosswind === "number" ? formatSpeedText(station.crosswind) : "--";
-        const thetaVec = sample ? normalizeDeg(sample.dir + 180) : 0;
+        const thetaVec =
+          sample && typeof sample.dir === "number"
+            ? normalizeDeg(sample.dir - state.shootingAzimuth + 180)
+            : 0;
         const distMeters = station.pathFraction * state.rangeMeters;
         const distShooter = formatDistanceText(distMeters);
         const distTarget = formatDistanceText(Math.max(state.rangeMeters - distMeters, 0));
